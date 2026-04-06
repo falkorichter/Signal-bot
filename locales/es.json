@@ -1,0 +1,5 @@
+{
+  "message_prefix": "👋 ¡Hola! Soy el bot de preguntas frecuentes.\n\nAquí está mi respuesta a tu pregunta:\n\n",
+  "message_suffix": "\n\n---\n⚠️ Aviso legal: Esta respuesta es generada automáticamente por una IA a partir de nuestra base de datos de preguntas frecuentes. Para asuntos oficiales o urgentes, comuníquese directamente con nosotros.",
+  "error_no_response": "Lo siento, no pude generar una respuesta a tu pregunta. Por favor, contáctenos directamente para obtener ayuda."
+}

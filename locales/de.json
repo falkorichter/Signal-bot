@@ -1,0 +1,5 @@
+{
+  "message_prefix": "👋 Hallo! Ich bin der FAQ-Bot.\n\nHier ist meine Antwort auf Ihre Frage:\n\n",
+  "message_suffix": "\n\n---\n⚠️ Haftungsausschluss: Diese Antwort wird automatisch von einer KI auf Basis unserer FAQ-Datenbank generiert. Für offizielle oder dringende Angelegenheiten wenden Sie sich bitte direkt an uns.",
+  "error_no_response": "Es tut mir leid, ich konnte keine Antwort auf Ihre Frage generieren. Bitte wenden Sie sich direkt an uns, um Hilfe zu erhalten."
+}
