@@ -44,6 +44,9 @@ class Session:
         "replied",
         "replied_at",
         "error",
+        "is_test",
+        "prompt_tokens",
+        "response_tokens",
     )
 
     def __init__(
@@ -60,6 +63,9 @@ class Session:
         replied: bool = False,
         replied_at: Optional[str] = None,
         error: Optional[str] = None,
+        is_test: bool = False,
+        prompt_tokens: Optional[int] = None,
+        response_tokens: Optional[int] = None,
     ) -> None:
         self.id: str = session_id or str(uuid.uuid4())
         self.timestamp: str = timestamp or datetime.now(timezone.utc).isoformat()
@@ -73,6 +79,9 @@ class Session:
         self.replied: bool = replied
         self.replied_at: Optional[str] = replied_at
         self.error: Optional[str] = error
+        self.is_test: bool = is_test
+        self.prompt_tokens: Optional[int] = prompt_tokens
+        self.response_tokens: Optional[int] = response_tokens
 
     # ------------------------------------------------------------------
     # Serialisation
@@ -96,6 +105,9 @@ class Session:
             replied=data.get("replied", False),
             replied_at=data.get("replied_at"),
             error=data.get("error"),
+            is_test=data.get("is_test", False),
+            prompt_tokens=data.get("prompt_tokens"),
+            response_tokens=data.get("response_tokens"),
         )
 
 

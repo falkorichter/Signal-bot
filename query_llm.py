@@ -14,6 +14,7 @@ Dependencies:
 
 import json
 import logging
+import os
 import subprocess
 import sys
 import urllib.error
@@ -67,7 +68,18 @@ def load_faqs(faq_file: Optional[str] = None) -> str:
 
 
 def fetch_appointments_text() -> str:
-    """Run fetch_appointments.py and return its stdout as a string."""
+    """Return appointment text, checking ``CALENDAR_APPOINTMENTS`` env-var first.
+
+    When the bot pipeline pre-fetches the calendar via ``CALENDAR_COMMAND`` and
+    exports the result as ``CALENDAR_APPOINTMENTS``, this function uses that
+    value directly — avoiding a redundant second fetch when ``query_llm.py`` is
+    called as the default ``LLM_COMMAND``.
+    """
+    env_calendar = os.environ.get("CALENDAR_APPOINTMENTS", "").strip()
+    if env_calendar:
+        logger.debug("Using CALENDAR_APPOINTMENTS from environment")
+        return env_calendar
+
     script = Path(__file__).parent / "fetch_appointments.py"
     try:
         result = subprocess.run(

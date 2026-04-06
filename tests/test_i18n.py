@@ -106,7 +106,6 @@ class TestGetMessage:
 class TestFallback:
     def test_falls_back_to_english_for_unknown_language(self):
         result = get_message("message_prefix", "xx_UNKNOWN")
-        # Should return the en_US value
         en_result = get_message("message_prefix", "en_US")
         assert result == en_result
 
@@ -114,15 +113,19 @@ class TestFallback:
         result = get_message("completely_unknown_key_xyz", "en_US")
         assert "completely_unknown_key_xyz" in result
 
-    def test_uses_bot_language_from_config_when_lang_is_none(self):
-        with patch("i18n.config") as mock_config:
-            mock_config.BOT_LANGUAGE = "en_US"
-            # Patch the import inside get_message
-            with patch("i18n.get_message.__globals__", {}, create=True):
-                pass  # Just verify no exception
-        # Call with explicit lang to test without mocking config
-        result = get_message("message_prefix", "en_US")
-        assert result != ""
+    def test_uses_bot_language_from_config_by_default(self):
+        """get_message() with no lang arg reads BOT_LANGUAGE from config."""
+        import config as _cfg
+        orig = _cfg.BOT_LANGUAGE
+        _cfg.BOT_LANGUAGE = "en_US"
+        try:
+            import i18n
+            i18n._cache.clear()
+            result = get_message("message_prefix")  # no explicit lang
+            assert result != ""
+            assert "FAQ" in result or "Hello" in result
+        finally:
+            _cfg.BOT_LANGUAGE = orig
 
 
 # ---------------------------------------------------------------------------

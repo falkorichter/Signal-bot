@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
-"""web_app.py — Flask web dashboard for the Signal FAQ Bot.
+"""web_app.py -- Flask web dashboard for the Signal FAQ Bot.
 
-Shows every processed message with its full pipeline in near-real time.
-The dashboard auto-refreshes every 5 seconds; no WebSocket required.
+Provides a live session list, a benchmark/test panel, token visualisation,
+and a config inspector.  The bot (bot.py) and the dashboard share
+data/sessions.json and can run in separate terminals simultaneously.
 
 Usage::
 
     python web_app.py [--host HOST] [--port PORT] [--debug]
-
-The bot (bot.py) and the dashboard read/write the same ``data/sessions.json``
-file and can run in separate terminals simultaneously.
 """
 
 import argparse
@@ -19,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from flask import Flask, abort, jsonify, render_template
+from flask import Flask, abort, jsonify, render_template, request
 
 from storage import SessionStore
 
@@ -27,45 +25,25 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# Each web_app process gets its own read-view of the store.
-# The bot writes; this process reads.  The store reloads from disk on
-# every request so the dashboard always shows the latest data.
-_store = SessionStore()
-
-
-# ---------------------------------------------------------------------------
-# Helper: reload from disk before each read so we always see bot writes
-# ---------------------------------------------------------------------------
 
 def _fresh_store() -> SessionStore:
-    """Return a store whose in-memory cache is refreshed from disk."""
-    # Re-load unconditionally — cheap because sessions.json is small.
-    store = SessionStore()
-    return store
-
-
-# ---------------------------------------------------------------------------
-# Routes
-# ---------------------------------------------------------------------------
+    """Return a SessionStore freshly loaded from disk."""
+    return SessionStore()
 
 
 @app.route("/")
 def dashboard():
-    """Serve the single-page dashboard shell."""
     return render_template("index.html")
 
 
 @app.route("/api/sessions")
 def api_sessions():
-    """Return all sessions as a JSON array, newest first."""
     store = _fresh_store()
-    sessions = store.get_all_sessions()
-    return jsonify([s.to_dict() for s in sessions])
+    return jsonify([s.to_dict() for s in store.get_all_sessions()])
 
 
 @app.route("/api/sessions/<session_id>")
 def api_session(session_id: str):
-    """Return a single session by ID."""
     store = _fresh_store()
     session = store.get_session(session_id)
     if session is None:
@@ -75,7 +53,6 @@ def api_session(session_id: str):
 
 @app.route("/api/stats")
 def api_stats():
-    """Return aggregate statistics as JSON."""
     store = _fresh_store()
     sessions = store.get_all_sessions()
     return jsonify(
@@ -86,13 +63,73 @@ def api_stats():
             "pending": sum(1 for s in sessions if s.is_question is None),
             "replied": sum(1 for s in sessions if s.replied),
             "errors": sum(1 for s in sessions if s.error),
+            "test_runs": sum(1 for s in sessions if s.is_test),
         }
     )
 
 
-# ---------------------------------------------------------------------------
-# Error handlers
-# ---------------------------------------------------------------------------
+@app.route("/api/config")
+def api_config():
+    from config import (
+        BOT_LANGUAGE,
+        CALENDAR_COMMAND,
+        LLM_COMMAND,
+        MONITOR_GROUP,
+        POLL_INTERVAL,
+        QUESTION_CHECK_COMMAND,
+        SIGNAL_NUMBER,
+        TOKEN_WINDOW,
+    )
+    return jsonify(
+        {
+            "signal_number": SIGNAL_NUMBER or "(not set)",
+            "monitor_group": MONITOR_GROUP or "(all)",
+            "bot_language": BOT_LANGUAGE,
+            "poll_interval": POLL_INTERVAL,
+            "token_window": TOKEN_WINDOW,
+            "question_check_command": QUESTION_CHECK_COMMAND,
+            "calendar_command": CALENDAR_COMMAND,
+            "llm_command": LLM_COMMAND,
+        }
+    )
+
+
+@app.route("/api/benchmark", methods=["POST"])
+def api_benchmark():
+    """Run the full bot pipeline for a manually entered message.
+
+    Request body (JSON): {"message": "What are the opening hours?"}
+
+    Returns the Session dict after all pipeline steps complete.
+    The session is flagged is_test=true and no real Signal DM is sent.
+    """
+    data = request.get_json(silent=True) or {}
+    message = (data.get("message") or "").strip()
+    if not message:
+        abort(400, description="'message' field is required and must not be empty")
+
+    from bot import run_pipeline
+
+    store = _fresh_store()
+    try:
+        session = run_pipeline(
+            message_text=message,
+            sender="benchmark-ui",
+            group_id="",
+            store=store,
+            is_test=True,
+            send_dm=False,
+        )
+        return jsonify(session.to_dict()), 200
+    except Exception as exc:
+        logger.error("Benchmark pipeline error: %s", exc, exc_info=True)
+        # Do not expose internal exception details (stack traces) to clients.
+        return jsonify({"error": "Pipeline execution failed. Check server logs for details."}), 500
+
+
+@app.errorhandler(400)
+def bad_request(err):
+    return jsonify({"error": str(err)}), 400
 
 
 @app.errorhandler(404)
@@ -106,28 +143,18 @@ def internal_error(err):
     return jsonify({"error": "Internal server error"}), 500
 
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
-
-
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         stream=sys.stderr,
     )
-    parser = argparse.ArgumentParser(description="Signal FAQ Bot — Web Dashboard")
-    parser.add_argument(
-        "--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)"
-    )
-    parser.add_argument(
-        "--port", type=int, default=5000, help="Listen port (default: 5000)"
-    )
+    parser = argparse.ArgumentParser(description="Signal FAQ Bot -- Web Dashboard")
+    parser.add_argument("--host", default="0.0.0.0", help="Bind host")
+    parser.add_argument("--port", type=int, default=5000, help="Listen port")
     parser.add_argument("--debug", action="store_true", help="Flask debug mode")
     args = parser.parse_args()
-
-    logger.info("Dashboard → http://%s:%d/", args.host, args.port)
+    logger.info("Dashboard at http://%s:%d/", args.host, args.port)
     app.run(host=args.host, port=args.port, debug=args.debug)
 
 

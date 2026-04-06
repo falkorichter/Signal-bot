@@ -73,6 +73,25 @@ class TestSessionSerialisation:
         assert s.is_question is None
         assert s.replied is False
         assert s.error is None
+        assert s.is_test is False
+        assert s.prompt_tokens is None
+        assert s.response_tokens is None
+
+    def test_new_fields_serialise(self):
+        s = Session(sender="+1", group_id="", message_text="X",
+                    is_test=True, prompt_tokens=100, response_tokens=20)
+        d = s.to_dict()
+        assert d["is_test"] is True
+        assert d["prompt_tokens"] == 100
+        assert d["response_tokens"] == 20
+
+    def test_new_fields_roundtrip(self):
+        s = Session(sender="+1", group_id="", message_text="X",
+                    is_test=True, prompt_tokens=512, response_tokens=64)
+        s2 = Session.from_dict(s.to_dict())
+        assert s2.is_test is True
+        assert s2.prompt_tokens == 512
+        assert s2.response_tokens == 64
 
 
 # ---------------------------------------------------------------------------

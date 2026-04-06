@@ -1,13 +1,11 @@
-"""Tests for bot.py — envelope parsing, pipeline logic, and message handling.
+"""Tests for bot.py -- envelope parsing, pipeline logic, and message handling.
 
-All external calls (signal-cli, LLM, appointments) are mocked so tests run
-offline without any side-effects.
+All external calls (signal-cli, shell commands) are mocked.
 """
 
 import json
 import subprocess
 from datetime import datetime, timezone
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -18,14 +16,11 @@ from bot import (
     extract_message_data,
     process_envelope,
     receive_messages,
+    run_pipeline,
     send_direct_message,
 )
 from storage import SessionStore
 
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 @pytest.fixture
 def store(tmp_path):
@@ -34,22 +29,16 @@ def store(tmp_path):
 
 def _envelope(sender="+1234567890", group_id="grp123", message_text="Hello?",
               include_data_message=True):
-    """Helper: build a minimal signal-cli envelope dict."""
     data_msg = {"message": message_text}
     if group_id:
         data_msg["groupInfo"] = {"groupId": group_id}
-    env = {
+    return {
         "envelope": {
             "source": sender,
             "dataMessage": data_msg if include_data_message else None,
         }
     }
-    return env
 
-
-# ---------------------------------------------------------------------------
-# extract_message_data
-# ---------------------------------------------------------------------------
 
 class TestExtractMessageData:
     def test_full_group_message(self):
@@ -66,9 +55,7 @@ class TestExtractMessageData:
 
     def test_empty_envelope(self):
         sender, group_id, text = extract_message_data({})
-        assert sender == ""
-        assert group_id == ""
-        assert text == ""
+        assert sender == group_id == text == ""
 
     def test_strips_whitespace_from_message(self):
         env = _envelope(message_text="  Hi?  ")
@@ -86,17 +73,12 @@ class TestExtractMessageData:
         assert text == ""
 
 
-# ---------------------------------------------------------------------------
-# receive_messages
-# ---------------------------------------------------------------------------
-
 class TestReceiveMessages:
     def test_parses_json_lines(self):
         envelope = _envelope()
-        output = json.dumps(envelope) + "\n"
         with patch("bot.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(
-                returncode=0, stdout=output, stderr=""
+                returncode=0, stdout=json.dumps(envelope) + "\n", stderr=""
             )
             result = receive_messages()
         assert len(result) == 1
@@ -104,10 +86,9 @@ class TestReceiveMessages:
 
     def test_skips_blank_lines(self):
         envelope = _envelope()
-        output = "\n" + json.dumps(envelope) + "\n\n"
         with patch("bot.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(
-                returncode=0, stdout=output, stderr=""
+                returncode=0, stdout="\n" + json.dumps(envelope) + "\n\n", stderr=""
             )
             result = receive_messages()
         assert len(result) == 1
@@ -117,25 +98,17 @@ class TestReceiveMessages:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout="not-json\n", stderr=""
             )
-            result = receive_messages()
-        assert result == []
+            assert receive_messages() == []
 
     def test_returns_empty_on_file_not_found(self):
-        with patch("bot.subprocess.run") as mock_run:
-            mock_run.side_effect = FileNotFoundError
-            result = receive_messages()
-        assert result == []
+        with patch("bot.subprocess.run", side_effect=FileNotFoundError):
+            assert receive_messages() == []
 
     def test_returns_empty_on_timeout(self):
-        with patch("bot.subprocess.run") as mock_run:
-            mock_run.side_effect = subprocess.TimeoutExpired(cmd="x", timeout=30)
-            result = receive_messages()
-        assert result == []
+        with patch("bot.subprocess.run",
+                   side_effect=subprocess.TimeoutExpired(cmd="x", timeout=30)):
+            assert receive_messages() == []
 
-
-# ---------------------------------------------------------------------------
-# send_direct_message
-# ---------------------------------------------------------------------------
 
 class TestSendDirectMessage:
     def test_returns_true_on_success(self):
@@ -145,144 +118,141 @@ class TestSendDirectMessage:
 
     def test_returns_false_on_nonzero_exit(self):
         with patch("bot.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=1, stderr="Send failed"
-            )
+            mock_run.return_value = MagicMock(returncode=1, stderr="Send failed")
             assert send_direct_message("+1", "Hi!") is False
 
     def test_returns_false_on_file_not_found(self):
-        with patch("bot.subprocess.run") as mock_run:
-            mock_run.side_effect = FileNotFoundError
+        with patch("bot.subprocess.run", side_effect=FileNotFoundError):
             assert send_direct_message("+1", "Hi!") is False
 
     def test_returns_false_on_timeout(self):
-        with patch("bot.subprocess.run") as mock_run:
-            mock_run.side_effect = subprocess.TimeoutExpired(cmd="x", timeout=30)
+        with patch("bot.subprocess.run",
+                   side_effect=subprocess.TimeoutExpired(cmd="x", timeout=30)):
             assert send_direct_message("+1", "Hi!") is False
 
 
-# ---------------------------------------------------------------------------
-# build_reply
-# ---------------------------------------------------------------------------
-
 class TestBuildReply:
     def test_reply_contains_answer(self):
-        reply = build_reply("The office opens at 9.")
-        assert "The office opens at 9." in reply
+        assert "The office opens at 9." in build_reply("The office opens at 9.")
 
     def test_reply_uses_prefix_override(self):
-        with patch("bot.MESSAGE_PREFIX", "BEFORE "), \
-             patch("bot.MESSAGE_SUFFIX", ""):
+        with patch("bot.MESSAGE_PREFIX", "BEFORE "), patch("bot.MESSAGE_SUFFIX", ""):
             reply = build_reply("Answer")
         assert reply.startswith("BEFORE ")
-        assert "Answer" in reply
 
     def test_reply_uses_suffix_override(self):
-        with patch("bot.MESSAGE_PREFIX", ""), \
-             patch("bot.MESSAGE_SUFFIX", " AFTER"):
+        with patch("bot.MESSAGE_PREFIX", ""), patch("bot.MESSAGE_SUFFIX", " AFTER"):
             reply = build_reply("Middle")
         assert reply.endswith(" AFTER")
-        assert "Middle" in reply
 
-    def test_reply_falls_back_to_i18n_when_prefix_empty(self):
-        with patch("bot.MESSAGE_PREFIX", ""), \
-             patch("bot.MESSAGE_SUFFIX", ""):
+    def test_falls_back_to_i18n_when_overrides_empty(self):
+        with patch("bot.MESSAGE_PREFIX", ""), patch("bot.MESSAGE_SUFFIX", ""):
             reply = build_reply("Answer")
-        # Should contain the i18n greeting
         assert "Answer" in reply
         assert len(reply) > len("Answer")
 
 
-# ---------------------------------------------------------------------------
-# process_envelope — end-to-end (all steps mocked)
-# ---------------------------------------------------------------------------
+class TestRunPipeline:
+    def test_not_a_question_session_created_not_replied(self, store):
+        with patch("bot.run_configured_command", return_value="false"), \
+             patch("bot.send_direct_message", return_value=True):
+            session = run_pipeline("Hi there", "+1", "grp", store)
+
+        assert session.is_question is False
+        assert session.replied is False
+        assert len(store.get_all_sessions()) == 1
+
+    def test_question_full_pipeline_marks_replied(self, store):
+        sides = ["true", "Appointments: none", "We open at 9."]
+        with patch("bot.run_configured_command", side_effect=sides), \
+             patch("bot.send_direct_message", return_value=True):
+            session = run_pipeline("What are the hours?", "+1", "grp", store)
+
+        assert session.is_question is True
+        assert session.appointments_text == "Appointments: none"
+        assert session.llm_response == "We open at 9."
+        assert session.replied is True
+
+    def test_is_test_flag_stored(self, store):
+        with patch("bot.run_configured_command", return_value="false"):
+            session = run_pipeline("Test msg", "benchmark-ui", "", store, is_test=True)
+        assert session.is_test is True
+
+    def test_no_dm_sent_when_send_dm_false(self, store):
+        sides = ["true", "Cal", "Answer"]
+        with patch("bot.run_configured_command", side_effect=sides), \
+             patch("bot.send_direct_message") as mock_send:
+            run_pipeline("Q?", "+1", "grp", store, send_dm=False)
+        mock_send.assert_not_called()
+
+    def test_session_still_marked_replied_when_send_dm_false(self, store):
+        sides = ["true", "Cal", "Answer"]
+        with patch("bot.run_configured_command", side_effect=sides):
+            session = run_pipeline("Q?", "+1", "grp", store, send_dm=False)
+        assert session.replied is True
+
+    def test_llm_failure_stores_error(self, store):
+        calls = [0]
+
+        def side_effect(*args, **kwargs):
+            calls[0] += 1
+            if calls[0] == 1:
+                return "true"
+            elif calls[0] == 2:
+                return "Calendar text"
+            else:
+                raise RuntimeError("LLM down")
+
+        with patch("bot.run_configured_command", side_effect=side_effect), \
+             patch("bot.send_direct_message", return_value=True):
+            session = run_pipeline("What?", "+1", "grp", store)
+
+        assert session.error is not None
+
+    def test_prompt_tokens_stored(self, store):
+        sides = ["true", "Cal text", "Answer"]
+        with patch("bot.run_configured_command", side_effect=sides), \
+             patch("bot.send_direct_message", return_value=True):
+            session = run_pipeline("Q?", "+1", "grp", store)
+        assert session.prompt_tokens is not None
+        assert isinstance(session.prompt_tokens, int)
+
+    def test_response_tokens_stored(self, store):
+        sides = ["true", "Cal text", "The answer is here."]
+        with patch("bot.run_configured_command", side_effect=sides), \
+             patch("bot.send_direct_message", return_value=True):
+            session = run_pipeline("Q?", "+1", "grp", store)
+        assert session.response_tokens is not None
+        assert session.response_tokens > 0
+
 
 class TestProcessEnvelope:
-    def _patch_pipeline(self, is_q=True, llm_ok=True, send_ok=True):
-        """Return a list of patch objects for the full pipeline."""
-        patches = [
-            patch("bot.is_question_heuristic", return_value=is_q),
-            patch("bot.fetch_appointments", return_value=[]),
-            patch("bot.format_appointments", return_value="Appointments: none"),
-            patch("bot.load_faqs", return_value="Q: Hours?\nA: 9-5."),
-            patch("bot.build_prompt", return_value="<prompt>"),
-            patch("bot._query_llm", return_value="The answer." if llm_ok else None),
-            patch("bot.send_direct_message", return_value=send_ok),
-        ]
-        return patches
-
     def test_ignores_envelope_without_message(self, store):
         env = _envelope(include_data_message=False)
-        process_envelope(env, store)
+        with patch("bot.MONITOR_GROUP", ""):
+            process_envelope(env, store)
         assert store.get_all_sessions() == []
 
     def test_ignores_wrong_group_when_monitor_group_set(self, store):
+        env = _envelope(group_id="wrong-group", message_text="Q?")
         with patch("bot.MONITOR_GROUP", "correct-group"):
-            env = _envelope(group_id="wrong-group", message_text="Q?")
             process_envelope(env, store)
         assert store.get_all_sessions() == []
 
     def test_ignores_envelope_without_sender(self, store):
         env = {"envelope": {"dataMessage": {"message": "Q?"}}}
-        process_envelope(env, store)
+        with patch("bot.MONITOR_GROUP", ""):
+            process_envelope(env, store)
         assert store.get_all_sessions() == []
-
-    def test_not_a_question_creates_session_but_no_reply(self, store):
-        patches = self._patch_pipeline(is_q=False)
-        env = _envelope(message_text="Hello, just saying hi.")
-        with patches[0]:  # is_question_heuristic only needed
-            with patches[6]:  # send_direct_message
-                with patch("bot.MONITOR_GROUP", ""):
-                    process_envelope(env, store)
-
-        sessions = store.get_all_sessions()
-        assert len(sessions) == 1
-        assert sessions[0].is_question is False
-        assert sessions[0].replied is False
-
-    def test_question_creates_replied_session(self, store):
-        env = _envelope(message_text="What are the hours?")
-        for p in self._patch_pipeline(is_q=True, llm_ok=True, send_ok=True):
-            p.start()
-        try:
-            with patch("bot.MONITOR_GROUP", ""):
-                process_envelope(env, store)
-        finally:
-            for p in self._patch_pipeline(is_q=True, llm_ok=True, send_ok=True):
-                try:
-                    p.stop()
-                except RuntimeError:
-                    pass
-
-        sessions = store.get_all_sessions()
-        assert len(sessions) == 1
 
     def test_deduplication_skips_already_replied(self, store):
         env = _envelope(sender="+1", message_text="Same question?")
-        # Create a session that is already marked as replied
         s = store.create_session("+1", "grp123", "Same question?")
         store.update_session(s.id, replied=True)
 
-        with patch("bot.MONITOR_GROUP", ""):
-            with patch("bot.is_question_heuristic") as mock_q:
-                process_envelope(env, store)
-                # Heuristic should NOT have been called because dedup fires first
-                mock_q.assert_not_called()
-
-        # No new session should be created
-        assert len(store.get_all_sessions()) == 1
-
-    def test_llm_failure_stores_error_message(self, store):
-        env = _envelope(message_text="What?")
-        with patch("bot.is_question_heuristic", return_value=True), \
-             patch("bot.fetch_appointments", return_value=[]), \
-             patch("bot.format_appointments", return_value=""), \
-             patch("bot.load_faqs", return_value=""), \
-             patch("bot.build_prompt", return_value=""), \
-             patch("bot._query_llm", side_effect=RuntimeError("LLM down")), \
-             patch("bot.send_direct_message", return_value=True), \
-             patch("bot.MONITOR_GROUP", ""):
+        with patch("bot.MONITOR_GROUP", ""), \
+             patch("bot.run_configured_command") as mock_cmd:
             process_envelope(env, store)
+            mock_cmd.assert_not_called()
 
-        sessions = store.get_all_sessions()
-        assert sessions[0].error is not None
+        assert len(store.get_all_sessions()) == 1

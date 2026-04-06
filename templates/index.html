@@ -6,6 +6,504 @@
   <title>Signal FAQ Bot — Dashboard</title>
   <link
     href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+    rel="stylesheet" crossorigin="anonymous"
+  />
+  <style>
+    body { background: #f0f2f5; }
+
+    /* ── Navbar ── */
+    .navbar-brand { font-weight: 700; letter-spacing: .03em; }
+    #refresh-badge { font-size:.75rem; padding:.25em .6em; transition:background-color .3s; }
+    #refresh-badge.refreshing { background-color:#0d6efd !important; }
+
+    /* ── Stat cards ── */
+    .stat-card { border:none; border-radius:12px; }
+    .stat-card .display-6 { font-size:2rem; font-weight:700; }
+
+    /* ── Benchmark panel ── */
+    #benchmark-card { border:none; border-radius:12px; }
+    #bench-textarea { font-size:.93rem; resize:vertical; min-height:80px; }
+    #token-bar-wrap { height:6px; border-radius:3px; background:#e9ecef; overflow:hidden; margin-top:4px; }
+    #token-bar      { height:100%; border-radius:3px; transition:width .2s, background-color .2s; }
+    #token-hint     { font-size:.75rem; color:#6c757d; }
+    #bench-result   { display:none; }
+
+    /* ── Session cards ── */
+    .session-card {
+      border-radius:12px; border:none;
+      border-left:5px solid #dee2e6;
+      transition:box-shadow .2s;
+    }
+    .session-card:hover          { box-shadow:0 4px 18px rgba(0,0,0,.09); }
+    .session-card.replied        { border-left-color:#198754; }
+    .session-card.error          { border-left-color:#dc3545; }
+    .session-card.question       { border-left-color:#0d6efd; }
+    .session-card.pending        { border-left-color:#ffc107; }
+    .session-card.test-session   { border-left-color:#6f42c1; }
+
+    @keyframes highlightIn {
+      from { background:#fff3cd; } to { background:#fff; }
+    }
+    .session-card.new-arrival { animation:highlightIn 2s ease-out forwards; }
+
+    /* ── Pipeline ── */
+    .pipeline { border-top:1px solid #e9ecef; padding-top:.75rem; margin-top:.75rem; }
+    .step { display:flex; gap:.75rem; align-items:flex-start; padding:.45rem .5rem; border-radius:6px; }
+    .step:nth-child(even) { background:#f8f9fa; }
+    .step-icon  { font-size:1.1rem; line-height:1.4; flex-shrink:0; width:1.5rem; text-align:center; }
+    .step-label { font-size:.78rem; color:#6c757d; font-weight:600; text-transform:uppercase; letter-spacing:.04em; white-space:nowrap; flex-shrink:0; width:7rem; padding-top:.1rem; }
+    .step-body  { font-size:.88rem; white-space:pre-wrap; word-break:break-word; flex:1; font-family:monospace; }
+    .step-missing { color:#adb5bd; font-style:italic; font-family:sans-serif; }
+
+    /* ── Token bar inside pipeline ── */
+    .token-row  { display:flex; align-items:center; gap:.5rem; margin-top:.35rem; }
+    .token-pbar { flex:1; height:8px; border-radius:4px; background:#e9ecef; overflow:hidden; }
+    .token-fill { height:100%; border-radius:4px; transition:width .3s; }
+    .token-fill.ok   { background:#198754; }
+    .token-fill.warn { background:#fd7e14; }
+    .token-fill.crit { background:#dc3545; }
+    .token-label { font-size:.72rem; color:#6c757d; white-space:nowrap; }
+
+    /* ── Misc ── */
+    .msg-preview {
+      font-size:.95rem; color:#212529;
+      display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+    }
+    .sender-chip { background:#e9ecef; border-radius:20px; padding:.15em .7em; font-size:.8rem; font-family:monospace; }
+    .btn-pipeline { font-size:.78rem; padding:.2em .7em; }
+    #empty-state  { display:none; }
+
+    /* ── Config drawer ── */
+    #config-pre { font-size:.78rem; white-space:pre-wrap; word-break:break-all; max-height:260px; overflow:auto; }
+  </style>
+</head>
+<body>
+
+<!-- ─── Navbar ─────────────────────────────────────────────────────────── -->
+<nav class="navbar navbar-dark bg-dark sticky-top shadow-sm">
+  <div class="container-fluid px-4">
+    <span class="navbar-brand mb-0 h1">📡 Signal FAQ Bot</span>
+    <div class="d-flex align-items-center gap-3">
+      <button class="btn btn-sm btn-outline-light" data-bs-toggle="offcanvas"
+              data-bs-target="#configDrawer" title="View current configuration">⚙ Config</button>
+      <span class="text-light" style="font-size:.82rem;" id="last-updated">Loading…</span>
+      <span id="refresh-badge" class="badge bg-secondary">⟳ live</span>
+    </div>
+  </div>
+</nav>
+
+<!-- ─── Config offcanvas ─────────────────────────────────────────────── -->
+<div class="offcanvas offcanvas-end" tabindex="-1" id="configDrawer">
+  <div class="offcanvas-header">
+    <h5 class="offcanvas-title">⚙ Bot Configuration</h5>
+    <button type="button" class="btn-close" data-bs-dismiss="offcanvas"></button>
+  </div>
+  <div class="offcanvas-body">
+    <p class="text-muted small">Live values from the server environment.</p>
+    <pre id="config-pre" class="bg-light p-2 rounded">Loading…</pre>
+    <p class="text-muted small mt-2">
+      Token window: <strong id="cfg-token-window">…</strong> tokens
+      (apfel default: 4096)
+    </p>
+  </div>
+</div>
+
+<!-- ─── Main ────────────────────────────────────────────────────────────── -->
+<div class="container-fluid px-4 py-4" style="max-width:1100px;">
+
+  <!-- Stats row -->
+  <div class="row g-3 mb-4" id="stats-row"></div>
+
+  <!-- ── Benchmark panel ─────────────────────────────────────────────── -->
+  <div class="card shadow-sm mb-4" id="benchmark-card">
+    <div class="card-header d-flex align-items-center gap-2">
+      <span>🧪</span>
+      <strong>Test / Benchmark</strong>
+      <span class="text-muted small ms-1">— run the full pipeline without sending a real Signal message</span>
+    </div>
+    <div class="card-body">
+      <label for="bench-textarea" class="form-label small text-muted">
+        Enter a question or chat message:
+      </label>
+      <textarea id="bench-textarea" class="form-control" rows="3"
+                placeholder="E.g. "What are the next available appointments?""></textarea>
+
+      <!-- Live token counter -->
+      <div class="d-flex justify-content-between align-items-center mt-1">
+        <span id="token-hint">0 chars · ~0 tokens</span>
+        <span id="token-window-label" class="text-muted" style="font-size:.75rem;"></span>
+      </div>
+      <div id="token-bar-wrap">
+        <div id="token-bar" style="width:0%;background:#198754;"></div>
+      </div>
+
+      <!-- Actions -->
+      <div class="d-flex gap-2 align-items-center mt-3">
+        <button id="bench-btn" class="btn btn-primary" onclick="runBenchmark()">
+          ▶ Run Pipeline
+        </button>
+        <span id="bench-status" class="text-muted small"></span>
+      </div>
+
+      <!-- Inline result -->
+      <div id="bench-result" class="mt-3 border rounded p-3 bg-light"></div>
+    </div>
+  </div>
+
+  <!-- Session list -->
+  <div id="sessions-list"></div>
+  <div id="empty-state" class="text-center py-5 text-muted">
+    <div style="font-size:3rem;">🤖</div>
+    <h5 class="mt-3">No sessions yet</h5>
+    <p class="mb-0">Messages processed by the bot will appear here. Use the Test panel above to try it now.</p>
+  </div>
+
+</div>
+
+<script>
+"use strict";
+
+// ─── Globals ────────────────────────────────────────────────────────────────
+let _tokenWindow = 4096;  // updated from /api/config
+let _knownIds    = new Set();
+
+// ─── Utilities ──────────────────────────────────────────────────────────────
+
+function esc(str) {
+  if (str == null) return "";
+  return String(str)
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;");
+}
+
+function badge(text, cls) { return `<span class="badge bg-${cls}">${esc(text)}</span>`; }
+
+function relTime(iso) {
+  if (!iso) return "";
+  const s = Math.round((Date.now() - new Date(iso)) / 1000);
+  if (s <  5) return "just now";
+  if (s < 60) return `${s}s ago`;
+  const m = Math.round(s/60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m/60);
+  if (h < 24) return `${h}h ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
+function estimateTokens(text) { return Math.max(0, Math.floor((text||"").length / 4)); }
+
+// ─── Token bar (in benchmark textarea) ──────────────────────────────────────
+
+document.getElementById("bench-textarea").addEventListener("input", function () {
+  updateInputTokenBar(this.value);
+});
+
+function updateInputTokenBar(text) {
+  const chars  = (text||"").length;
+  const tokens = estimateTokens(text);
+  const pct    = Math.min(100, (tokens / _tokenWindow) * 100);
+
+  document.getElementById("token-hint").textContent =
+    `${chars.toLocaleString()} chars · ~${tokens.toLocaleString()} tokens`;
+  document.getElementById("token-bar").style.width = pct + "%";
+
+  const bar = document.getElementById("token-bar");
+  bar.style.backgroundColor = pct < 70 ? "#198754" : pct < 90 ? "#fd7e14" : "#dc3545";
+
+  const lbl = document.getElementById("token-window-label");
+  if (pct > 70) {
+    lbl.textContent = `${pct.toFixed(0)}% of ${_tokenWindow.toLocaleString()} token window`;
+    lbl.style.color = pct >= 90 ? "#dc3545" : "#fd7e14";
+  } else {
+    lbl.textContent = `window: ${_tokenWindow.toLocaleString()} tokens`;
+    lbl.style.color = "";
+  }
+}
+
+// ─── Stats row ──────────────────────────────────────────────────────────────
+
+function renderStats(stats) {
+  const cards = [
+    { label:"Total",    value:stats.total,        icon:"💬", cls:"primary"                  },
+    { label:"Questions",value:stats.questions,     icon:"❓", cls:"info"                     },
+    { label:"Replied",  value:stats.replied,       icon:"✅", cls:"success"                  },
+    { label:"Errors",   value:stats.errors,        icon:"❌", cls:"danger"                   },
+    { label:"Tests",    value:stats.test_runs||0,  icon:"🧪", cls:"secondary text-dark"      },
+  ];
+  document.getElementById("stats-row").innerHTML = cards.map(c => `
+    <div class="col-6 col-md">
+      <div class="card stat-card shadow-sm h-100">
+        <div class="card-body text-center py-3">
+          <div style="font-size:1.7rem">${c.icon}</div>
+          <div class="display-6 text-${c.cls.split(" ")[0]}">${c.value}</div>
+          <div class="text-muted" style="font-size:.82rem">${c.label}</div>
+        </div>
+      </div>
+    </div>`).join("");
+}
+
+// ─── Token bar (inside pipeline) ────────────────────────────────────────────
+
+function tokenBar(promptTokens, responseTokens) {
+  if (promptTokens == null) return "";
+  const pPct  = Math.min(100, (promptTokens  / _tokenWindow) * 100);
+  const rPct  = Math.min(100, ((responseTokens||0) / _tokenWindow) * 100);
+  const cls   = pPct < 70 ? "ok" : pPct < 90 ? "warn" : "crit";
+
+  return `
+    <div class="token-row mt-2">
+      <span class="token-label" style="min-width:3.5rem">Prompt</span>
+      <div class="token-pbar">
+        <div class="token-fill ${cls}" style="width:${pPct.toFixed(1)}%"></div>
+      </div>
+      <span class="token-label"
+            title="~${promptTokens} estimated tokens / ${_tokenWindow} window">
+        ~${promptTokens.toLocaleString()} / ${_tokenWindow.toLocaleString()} tok
+        ${pPct >= 90 ? '⚠️' : ''}
+      </span>
+    </div>
+    ${responseTokens != null ? `
+    <div class="token-row">
+      <span class="token-label" style="min-width:3.5rem">Response</span>
+      <div class="token-pbar">
+        <div class="token-fill ok" style="width:${rPct.toFixed(1)}%"></div>
+      </div>
+      <span class="token-label">~${responseTokens.toLocaleString()} tok</span>
+    </div>` : ""}`;
+}
+
+// ─── Pipeline renderer ───────────────────────────────────────────────────────
+
+function step(icon, label, body) {
+  const bodyHtml = body != null
+    ? `<span class="step-body">${esc(body)}</span>`
+    : `<span class="step-body step-missing">—</span>`;
+  return `<div class="step">
+    <span class="step-icon">${icon}</span>
+    <span class="step-label">${label}</span>
+    ${bodyHtml}
+  </div>`;
+}
+
+function renderPipeline(s) {
+  let html = '<div class="pipeline">';
+  html += step("📨", "Received",    s.message_text);
+
+  if      (s.is_question === true)  html += step("🔍","Question?", "✅ Yes");
+  else if (s.is_question === false) html += step("🔍","Question?", "⬜ No — ignored");
+  else                              html += step("🔍","Question?", null);
+
+  if (s.is_question === true) {
+    html += step("📅", "Calendar",    s.appointments_text || null);
+    html += step("🤖", "LLM output",  s.llm_response      || null);
+  }
+
+  if (s.replied || s.final_message) {
+    const msg = s.final_message
+      ? (s.final_message.length > 600
+           ? s.final_message.slice(0,600) + "…"
+           : s.final_message)
+      : null;
+    html += step("💬", s.replied ? "Sent DM ✅" : "Reply", msg);
+  }
+
+  if (s.error) html += step("❌", "Error", s.error);
+
+  // Token visualisation
+  html += tokenBar(s.prompt_tokens, s.response_tokens);
+
+  html += "</div>";
+  return html;
+}
+
+// ─── Session card ────────────────────────────────────────────────────────────
+
+function sessionCardClass(s) {
+  if (s.is_test)          return "test-session";
+  if (s.error)            return "error";
+  if (s.replied)          return "replied";
+  if (s.is_question)      return "question";
+  if (s.is_question===false) return "";
+  return "pending";
+}
+
+function renderSessionCard(s, isNew) {
+  const uid = `pl-${s.id.replace(/-/g,"")}`;
+  let badges = "";
+  if (s.is_test)               badges += badge("🧪 Test","secondary text-dark") + " ";
+  if (s.is_question===true)    badges += badge("Question","primary") + " ";
+  if (s.is_question===false)   badges += badge("Not a question","secondary") + " ";
+  if (s.replied)               badges += badge("Replied ✅","success") + " ";
+  if (s.error)                 badges += badge("Error","danger") + " ";
+  if (s.is_question===null)    badges += badge("Pending…","warning text-dark") + " ";
+
+  return `
+    <div class="card session-card shadow-sm mb-3 ${sessionCardClass(s)} ${isNew?"new-arrival":""}"
+         data-id="${esc(s.id)}">
+      <div class="card-body py-3">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+          <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span class="sender-chip">${esc(s.sender||"unknown")}</span>
+            ${s.group_id ? `<span class="text-muted" style="font-size:.78rem">group:${esc(s.group_id.slice(0,12))}…</span>` : ""}
+            ${badges}
+          </div>
+          <span class="text-muted" style="font-size:.78rem" title="${esc(s.timestamp)}">${relTime(s.timestamp)}</span>
+        </div>
+        <p class="msg-preview mb-2">${esc(s.message_text)}</p>
+        <button class="btn btn-outline-secondary btn-pipeline"
+                type="button" data-bs-toggle="collapse"
+                data-bs-target="#${uid}" aria-expanded="false">
+          Show pipeline ▾
+        </button>
+        <div class="collapse" id="${uid}">${renderPipeline(s)}</div>
+      </div>
+    </div>`;
+}
+
+// ─── Benchmark runner ────────────────────────────────────────────────────────
+
+async function runBenchmark() {
+  const ta  = document.getElementById("bench-textarea");
+  const btn = document.getElementById("bench-btn");
+  const st  = document.getElementById("bench-status");
+  const res = document.getElementById("bench-result");
+
+  const message = ta.value.trim();
+  if (!message) {
+    ta.focus();
+    ta.classList.add("is-invalid");
+    st.textContent = "⚠ Please enter a message first.";
+    return;
+  }
+  ta.classList.remove("is-invalid");
+
+  // Disable button and show reason — per copilot-instructions: never disable silently
+  btn.disabled = true;
+  btn.innerHTML = "⏳ Running pipeline…";
+  st.textContent = "Sending to bot pipeline…";
+  res.style.display = "none";
+
+  try {
+    const resp = await fetch("/api/benchmark", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({message}),
+    });
+    const session = await resp.json();
+
+    if (!resp.ok) {
+      throw new Error(session.error || `HTTP ${resp.status}`);
+    }
+
+    res.style.display = "block";
+    res.innerHTML = `
+      <h6 class="mb-2">Pipeline result
+        <span class="badge bg-secondary ms-1" style="font-size:.7rem">${esc(session.id.slice(0,8))}…</span>
+      </h6>
+      ${renderPipeline(session)}`;
+    st.textContent = "✅ Done — scroll down to see the session in the list.";
+
+    // Trigger a list refresh so the test session appears
+    refresh();
+
+  } catch (err) {
+    console.error("Benchmark failed:", err);
+    st.textContent = "❌ Failed: " + err.message;
+    res.style.display = "none";
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = "▶ Run Pipeline";
+  }
+}
+
+// ─── Session list refresh ────────────────────────────────────────────────────
+
+async function refresh() {
+  const badge = document.getElementById("refresh-badge");
+  badge.classList.add("refreshing");
+
+  try {
+    const [sResp, stResp] = await Promise.all([
+      fetch("/api/sessions"),
+      fetch("/api/stats"),
+    ]);
+    if (!sResp.ok || !stResp.ok)
+      throw new Error(`API ${sResp.status}/${stResp.status}`);
+
+    const sessions = await sResp.json();
+    const stats    = await stResp.json();
+
+    renderStats(stats);
+
+    const container  = document.getElementById("sessions-list");
+    const emptyState = document.getElementById("empty-state");
+
+    if (sessions.length === 0) {
+      container.innerHTML = "";
+      emptyState.style.display = "block";
+    } else {
+      emptyState.style.display = "none";
+      const newIds   = new Set(sessions.map(s=>s.id));
+      const arrivals = sessions.filter(s=>!_knownIds.has(s.id));
+      _knownIds      = newIds;
+      container.innerHTML = sessions.map(s =>
+        renderSessionCard(s, arrivals.some(a=>a.id===s.id))
+      ).join("");
+    }
+
+    document.getElementById("last-updated").textContent =
+      `Updated ${new Date().toLocaleTimeString()}`;
+
+  } catch (err) {
+    console.error("Refresh failed:", err);
+    document.getElementById("last-updated").textContent =
+      `⚠ Refresh failed — ${err.message}`;
+  } finally {
+    badge.classList.remove("refreshing");
+  }
+}
+
+// ─── Load config ─────────────────────────────────────────────────────────────
+
+async function loadConfig() {
+  try {
+    const cfg = await fetch("/api/config").then(r=>r.json());
+    _tokenWindow = cfg.token_window || 4096;
+    document.getElementById("cfg-token-window").textContent =
+      _tokenWindow.toLocaleString();
+    document.getElementById("cfg-token-window").parentElement.innerHTML =
+      `Token window: <strong>${_tokenWindow.toLocaleString()}</strong> tokens ` +
+      `<span class="text-muted">(apfel default: 4096)</span>`;
+    document.getElementById("token-window-label").textContent =
+      `window: ${_tokenWindow.toLocaleString()} tokens`;
+
+    // Pretty-print config
+    document.getElementById("config-pre").textContent =
+      JSON.stringify(cfg, null, 2);
+  } catch (err) {
+    console.error("Failed to load config:", err);
+  }
+}
+
+// ─── Boot ────────────────────────────────────────────────────────────────────
+loadConfig();
+refresh();
+setInterval(refresh, 5000);
+</script>
+
+<script
+  src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+  crossorigin="anonymous">
+</script>
+</body>
+</html>
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Signal FAQ Bot — Dashboard</title>
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
     rel="stylesheet"
     crossorigin="anonymous"
   />
