@@ -1,0 +1,9 @@
+# Runtime dependencies
+Flask>=2.3.3
+
+# Optional: load .env files automatically
+# python-dotenv>=1.0.0
+
+# Development / testing
+# pytest>=7.0
+# pytest-mock>=3.0

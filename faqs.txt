@@ -1,0 +1,35 @@
+Q: What are your office hours?
+A: Our office is open Monday through Friday, 9:00 AM to 5:00 PM. We are closed on weekends and public holidays.
+
+Q: How can I book an appointment?
+A: You can book an appointment by calling our office, visiting our website, or by asking this FAQ bot about available slots — it will show you the latest upcoming appointments.
+
+Q: Where is your office located?
+A: Our office is located at [ADDRESS]. We are easily accessible by public transport and there is free parking nearby.
+
+Q: How do I cancel or reschedule an appointment?
+A: To cancel or reschedule, please contact us at least 24 hours in advance by calling [PHONE NUMBER] or emailing [EMAIL ADDRESS].
+
+Q: Do you offer emergency services?
+A: For emergencies, please call [EMERGENCY NUMBER] or visit the nearest emergency room. Our regular office does not handle emergencies.
+
+Q: What documents do I need to bring to my appointment?
+A: Please bring a valid photo ID and any relevant documents related to your appointment. Specific requirements may vary; check your appointment confirmation for details.
+
+Q: How long does an appointment typically take?
+A: Most appointments last between 30 and 60 minutes, depending on the type of service. You will be informed of the expected duration when booking.
+
+Q: Is there parking available?
+A: Yes, there is free parking available near the office. Public transport is also recommended.
+
+Q: Can I bring a friend or family member to my appointment?
+A: Yes, you are welcome to bring a support person. Please let us know in advance if you require additional accommodation.
+
+Q: How do I get directions to the office?
+A: Our address is [ADDRESS]. You can find us on Google Maps by searching for [OFFICE NAME]. The nearest public transport stop is [STOP NAME].
+
+Q: What is the cancellation policy?
+A: Appointments cancelled less than 24 hours in advance may incur a cancellation fee. Please contact us as early as possible if you need to reschedule.
+
+Q: Is the office wheelchair accessible?
+A: Yes, our office is fully wheelchair accessible. Please let us know in advance if you have any specific accessibility needs.

@@ -1,0 +1,30 @@
+[project]
+name = "signal-faq-bot"
+version = "0.2.0"
+description = "A Signal bot that monitors a group channel and automatically answers questions using a local LLM"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+keywords = ["signal", "bot", "llm", "faq", "ollama"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-mock>=3.0",
+]
+dotenv = [
+    "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+signal-faq-bot = "bot:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+log_cli = true
+log_cli_level = "WARNING"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.backends.legacy:build"
